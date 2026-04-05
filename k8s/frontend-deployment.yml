@@ -1,0 +1,110 @@
+# ============================================================
+# k8s/frontend-deployment.yml
+# Kubernetes manifests for Smart Habit Tracker Frontend
+# ============================================================
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: habit-frontend
+  namespace: habit-tracker
+  labels:
+    app: habit-frontend
+    version: "1.0.0"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: habit-frontend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: habit-frontend
+    spec:
+      containers:
+        - name: frontend
+          image: ghcr.io/YOUR_ORG/smart-habit-tracker-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"
+
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 20
+
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_BIND_SERVICE"]
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: habit-frontend-svc
+  namespace: habit-tracker
+spec:
+  selector:
+    app: habit-frontend
+  ports:
+    - port: 80
+      targetPort: 80
+  type: LoadBalancer     # Exposes externally via cloud LB
+
+---
+# ─────────────────────────────────────────
+# Ingress — Route external traffic
+# ─────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: habit-tracker-ingress
+  namespace: habit-tracker
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: habit-tracker.vate.dev
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: habit-backend-svc
+                port:
+                  number: 3001
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: habit-frontend-svc
+                port:
+                  number: 80

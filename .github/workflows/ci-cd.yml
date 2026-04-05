@@ -1,0 +1,294 @@
+# ============================================================
+# .github/workflows/ci-cd.yml
+# Smart Habit Streak Tracker — Full CI/CD Pipeline
+# Team Vate | Teju P (CI/CD) + Varsha M (Security/IaC)
+# ============================================================
+
+name: 🚀 CI/CD Pipeline — Smart Habit Tracker
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  BACKEND_IMAGE: smart-habit-tracker-backend
+  FRONTEND_IMAGE: smart-habit-tracker-frontend
+
+jobs:
+
+  # ═══════════════════════════════════════════════
+  # JOB 1 — CODE QUALITY & LINTING
+  # ═══════════════════════════════════════════════
+  lint:
+    name: 🔍 Code Quality Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install Backend Dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: ./backend
+        run: npx eslint . --ext .js --ignore-pattern node_modules/ || true
+
+      - name: Check for TODO/FIXME in code
+        run: |
+          echo "Scanning for TODOs..."
+          grep -rn "TODO\|FIXME\|HACK" --include="*.js" . || echo "None found"
+
+  # ═══════════════════════════════════════════════
+  # JOB 2 — UNIT TESTS
+  # ═══════════════════════════════════════════════
+  test:
+    name: 🧪 Run Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install Dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Run Tests with Coverage
+        working-directory: ./backend
+        run: npm test -- --coverage --forceExit
+
+      - name: Upload Coverage Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: backend/coverage/
+          retention-days: 7
+
+      - name: Coverage Summary
+        working-directory: ./backend
+        run: |
+          echo "### Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          cat coverage/coverage-summary.json 2>/dev/null | node -e "
+            const data = require('fs').readFileSync('/dev/stdin','utf8');
+            const json = JSON.parse(data);
+            const t = json.total;
+            console.log('Lines: ' + t.lines.pct + '%');
+            console.log('Functions: ' + t.functions.pct + '%');
+            console.log('Branches: ' + t.branches.pct + '%');
+          " || echo "Coverage data not available"
+
+  # ═══════════════════════════════════════════════
+  # JOB 3 — SECURITY SCAN (Trivy)
+  # ═══════════════════════════════════════════════
+  security:
+    name: 🔐 Security Scan
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy FS Scan (Vulnerabilities)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '0'         # Don't fail pipeline on vulns (log only)
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+      - name: Run Trivy Config Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '0'
+
+      - name: Dependency Audit (npm)
+        working-directory: ./backend
+        run: |
+          npm ci
+          npm audit --audit-level=critical || true
+          echo "Security audit complete"
+
+  # ═══════════════════════════════════════════════
+  # JOB 4 — BUILD DOCKER IMAGES
+  # ═══════════════════════════════════════════════
+  build:
+    name: 🐳 Build Docker Images
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    outputs:
+      backend-image: ${{ steps.meta-backend.outputs.tags }}
+      frontend-image: ${{ steps.meta-frontend.outputs.tags }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Metadata — Backend
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ env.BACKEND_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Extract Metadata — Frontend
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ env.FRONTEND_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build Backend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          dockerfile: ./backend/Dockerfile
+          target: production
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: ${{ steps.meta-backend.outputs.labels }}
+
+      - name: Build Frontend Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          dockerfile: ./frontend/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+
+  # ═══════════════════════════════════════════════
+  # JOB 5 — SCAN BUILT IMAGES (Trivy)
+  # ═══════════════════════════════════════════════
+  scan-images:
+    name: 🛡️ Scan Container Images
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Scan Backend Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ env.BACKEND_IMAGE }}:latest
+          format: 'sarif'
+          output: 'backend-trivy.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+
+      - name: Upload Trivy Results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'backend-trivy.sarif'
+
+  # ═══════════════════════════════════════════════
+  # JOB 6 — DEPLOY (main branch only)
+  # ═══════════════════════════════════════════════
+  deploy:
+    name: 🚀 Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build, scan-images]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: production
+      url: http://localhost
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Create Deployment Summary
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Triggered by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Time | $(date -u) |" >> $GITHUB_STEP_SUMMARY
+
+      # Uncomment for actual deployment:
+      # - name: Deploy to Server
+      #   uses: appleboy/ssh-action@master
+      #   with:
+      #     host: ${{ secrets.DEPLOY_HOST }}
+      #     username: ${{ secrets.DEPLOY_USER }}
+      #     key: ${{ secrets.DEPLOY_SSH_KEY }}
+      #     script: |
+      #       cd /opt/smart-habit-tracker
+      #       docker-compose pull
+      #       docker-compose up -d --no-build
+      #       docker system prune -f
+
+      - name: Notify Deployment Success
+        run: echo "✅ Deployment pipeline completed successfully!"
+
+  # ═══════════════════════════════════════════════
+  # JOB 7 — PIPELINE SUMMARY
+  # ═══════════════════════════════════════════════
+  summary:
+    name: 📋 Pipeline Summary
+    runs-on: ubuntu-latest
+    needs: [lint, test, security, build]
+    if: always()
+    steps:
+      - name: Write Summary
+        run: |
+          echo "## 📊 CI/CD Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security | ${{ needs.security.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Project:** Smart Habit Streak Tracker — Team Vate" >> $GITHUB_STEP_SUMMARY
+          echo "**Members:** Teju P (1MS23CS198) · Varsha M (1MS23CS205)" >> $GITHUB_STEP_SUMMARY

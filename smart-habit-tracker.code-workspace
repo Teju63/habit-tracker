@@ -1,0 +1,83 @@
+{
+  "folders": [
+    { "path": ".", "name": "🏠 Root" },
+    { "path": "frontend", "name": "🌐 Frontend" },
+    { "path": "backend", "name": "🔧 Backend" }
+  ],
+  "settings": {
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2,
+    "files.exclude": {
+      "**/node_modules": true,
+      "**/coverage": true,
+      "**/.terraform": true
+    },
+    "docker.showStartPage": false,
+    "terminal.integrated.defaultProfile.linux": "bash"
+  },
+  "extensions": {
+    "recommendations": [
+      "ms-azuretools.vscode-docker",
+      "hashicorp.terraform",
+      "redhat.ansible",
+      "ms-kubernetes-tools.vscode-kubernetes-tools",
+      "esbenp.prettier-vscode",
+      "dbaeumer.vscode-eslint",
+      "eamodio.gitlens",
+      "humao.rest-client"
+    ]
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "type": "node",
+        "request": "launch",
+        "name": "▶ Run Backend (Debug)",
+        "skipFiles": ["<node_internals>/**"],
+        "program": "${workspaceFolder}/backend/server.js",
+        "env": { "NODE_ENV": "development", "PORT": "3001" },
+        "console": "integratedTerminal"
+      },
+      {
+        "type": "node",
+        "request": "launch",
+        "name": "🧪 Run Tests",
+        "program": "${workspaceFolder}/backend/node_modules/.bin/jest",
+        "args": ["--coverage", "--forceExit"],
+        "cwd": "${workspaceFolder}/backend",
+        "console": "integratedTerminal"
+      }
+    ]
+  },
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "🐳 Docker Compose Up",
+        "type": "shell",
+        "command": "docker-compose up --build",
+        "group": "build",
+        "presentation": { "reveal": "always", "panel": "new" }
+      },
+      {
+        "label": "🐳 Docker Compose Down",
+        "type": "shell",
+        "command": "docker-compose down",
+        "group": "build"
+      },
+      {
+        "label": "🧪 Run Backend Tests",
+        "type": "shell",
+        "command": "cd backend && npm test",
+        "group": "test"
+      },
+      {
+        "label": "📦 Install Backend Deps",
+        "type": "shell",
+        "command": "cd backend && npm install",
+        "group": "build"
+      }
+    ]
+  }
+}

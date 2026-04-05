@@ -1,0 +1,180 @@
+---
+# ============================================================
+# ansible/playbook.yml — Server Setup & Configuration
+# Team Vate | Varsha M (1MS23CS205)
+# ============================================================
+
+- name: Configure Smart Habit Tracker Servers
+  hosts: app_servers
+  become: yes
+  vars:
+    app_dir: /opt/smart-habit-tracker
+    docker_compose_version: "2.23.0"
+    node_version: "20"
+
+  tasks:
+
+    # ─────────────────────────────────────────
+    # SYSTEM SETUP
+    # ─────────────────────────────────────────
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install required system packages
+      apt:
+        name:
+          - curl
+          - wget
+          - git
+          - ca-certificates
+          - gnupg
+          - lsb-release
+          - ufw
+          - fail2ban
+        state: present
+
+    # ─────────────────────────────────────────
+    # SECURITY HARDENING
+    # ─────────────────────────────────────────
+    - name: Configure UFW — allow SSH
+      ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+
+    - name: Configure UFW — allow HTTP
+      ufw:
+        rule: allow
+        port: "80"
+        proto: tcp
+
+    - name: Configure UFW — allow HTTPS
+      ufw:
+        rule: allow
+        port: "443"
+        proto: tcp
+
+    - name: Enable UFW firewall
+      ufw:
+        state: enabled
+        policy: deny
+
+    - name: Enable fail2ban
+      service:
+        name: fail2ban
+        state: started
+        enabled: yes
+
+    - name: Disable root SSH login
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PermitRootLogin'
+        line: 'PermitRootLogin no'
+        backup: yes
+      notify: Restart SSH
+
+    # ─────────────────────────────────────────
+    # DOCKER INSTALLATION
+    # ─────────────────────────────────────────
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+
+    - name: Install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+        update_cache: yes
+
+    - name: Start and enable Docker
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add deploy user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    # ─────────────────────────────────────────
+    # APP DEPLOYMENT
+    # ─────────────────────────────────────────
+    - name: Create application directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0755"
+
+    - name: Copy docker-compose.yml
+      copy:
+        src: ../docker-compose.yml
+        dest: "{{ app_dir }}/docker-compose.yml"
+        owner: "{{ ansible_user }}"
+        mode: "0644"
+
+    - name: Copy monitoring configs
+      copy:
+        src: ../monitoring/
+        dest: "{{ app_dir }}/monitoring/"
+        owner: "{{ ansible_user }}"
+
+    - name: Pull latest Docker images
+      command: docker compose pull
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Start application services
+      command: docker compose up -d --remove-orphans
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Verify services are running
+      command: docker compose ps
+      args:
+        chdir: "{{ app_dir }}"
+      register: services_status
+
+    - name: Print service status
+      debug:
+        var: services_status.stdout_lines
+
+    # ─────────────────────────────────────────
+    # MONITORING SETUP
+    # ─────────────────────────────────────────
+    - name: Verify Prometheus is reachable
+      uri:
+        url: "http://localhost:9090/-/healthy"
+        status_code: 200
+      retries: 5
+      delay: 10
+      ignore_errors: yes
+
+    - name: Verify Grafana is reachable
+      uri:
+        url: "http://localhost:3000/api/health"
+        status_code: 200
+      retries: 5
+      delay: 10
+      ignore_errors: yes
+
+  handlers:
+    - name: Restart SSH
+      service:
+        name: sshd
+        state: restarted

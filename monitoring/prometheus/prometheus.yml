@@ -1,0 +1,41 @@
+# prometheus.yml — Prometheus Configuration
+# Smart Habit Streak Tracker
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    project: 'smart-habit-tracker'
+    team: 'vate'
+
+# ─────────────────────────────────────────
+# Scrape Targets
+# ─────────────────────────────────────────
+scrape_configs:
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Backend API metrics
+  - job_name: 'habit-tracker-backend'
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    static_configs:
+      - targets: ['backend:3001']
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'backend-api'
+
+  # Frontend (nginx)
+  - job_name: 'habit-tracker-frontend'
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['frontend:80']
+
+  # Node Exporter (system metrics) — uncomment when deployed
+  # - job_name: 'node'
+  #   static_configs:
+  #     - targets: ['node-exporter:9100']

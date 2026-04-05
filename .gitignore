@@ -1,0 +1,49 @@
+# ============================================================
+# .gitignore — Smart Habit Tracker
+# ============================================================
+
+# Node
+node_modules/
+npm-debug.log*
+.npm
+
+# Test coverage
+coverage/
+*.lcov
+
+# Environment files — NEVER commit secrets
+.env
+.env.local
+.env.*.local
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+
+# Build artifacts
+dist/
+build/
+*.log
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+.terraform.lock.hcl
+
+# Docker
+.dockerignore
+
+# Secrets (HashiCorp Vault)
+*.vault
+vault-token
+
+# Kubernetes secrets (never commit these)
+k8s/secrets/

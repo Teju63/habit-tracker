@@ -1,0 +1,172 @@
+# ============================================================
+# k8s/backend-deployment.yml
+# Kubernetes manifests for Smart Habit Tracker Backend
+# ============================================================
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: habit-tracker
+  labels:
+    project: smart-habit-tracker
+    team: vate
+
+---
+# ─────────────────────────────────────────
+# Backend Deployment
+# ─────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: habit-backend
+  namespace: habit-tracker
+  labels:
+    app: habit-backend
+    version: "1.0.0"
+    team: vate
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: habit-backend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0        # Zero-downtime deployments
+  template:
+    metadata:
+      labels:
+        app: habit-backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3001"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Security context — don't run as root
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        fsGroup: 1001
+
+      containers:
+        - name: backend
+          image: ghcr.io/YOUR_ORG/smart-habit-tracker-backend:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3001
+              protocol: TCP
+
+          # Environment from ConfigMap & Secrets
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3001"
+            - name: ALLOWED_ORIGIN
+              valueFrom:
+                configMapKeyRef:
+                  name: habit-config
+                  key: ALLOWED_ORIGIN
+
+          # Resource limits (security + cost control)
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+          # Health probes
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+
+          # Security context
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+      # Restart policy
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+
+---
+# ─────────────────────────────────────────
+# Backend Service
+# ─────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: habit-backend-svc
+  namespace: habit-tracker
+  labels:
+    app: habit-backend
+spec:
+  selector:
+    app: habit-backend
+  ports:
+    - name: http
+      port: 3001
+      targetPort: 3001
+      protocol: TCP
+  type: ClusterIP
+
+---
+# ─────────────────────────────────────────
+# ConfigMap
+# ─────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: habit-config
+  namespace: habit-tracker
+data:
+  ALLOWED_ORIGIN: "http://habit-frontend-svc"
+  LOG_LEVEL: "info"
+
+---
+# ─────────────────────────────────────────
+# HPA — Horizontal Pod Autoscaler
+# ─────────────────────────────────────────
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: habit-backend-hpa
+  namespace: habit-tracker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: habit-backend
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
