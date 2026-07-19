@@ -1,15 +1,6 @@
-# ◈ Smart Habit Streak Tracker
-### Team Vate — DevSecOps Project
+# ◈ Smart Habit Streak Tracker - DevSecOps
 
 > A lightweight productivity app that tracks daily tasks, weekly progress, and consistency streaks — gamifying habit-building with a full DevSecOps pipeline.
-
----
-
-## 👥 Team Members
-
-| Member | Roll No | Role |
-|--------|---------|------|
-| Teju P | 1MS23CS198 | CI/CD Pipeline & Containerization |
 
 
 ---
