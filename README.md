@@ -10,7 +10,7 @@
 | Member | Roll No | Role |
 |--------|---------|------|
 | Teju P | 1MS23CS198 | CI/CD Pipeline & Containerization |
-| Varsha M | 1MS23CS205 | IaC, Monitoring & Security |
+
 
 ---
 
